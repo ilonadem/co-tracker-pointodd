@@ -15,6 +15,48 @@ from cotracker.datasets.utils import CoTrackerData
 from torchvision.transforms import ColorJitter, GaussianBlur
 from PIL import Image
 
+import pdb
+import matplotlib.pyplot as plt
+
+def save_img_with_tracks(rgb_frame, point_tracks, visibility, save_path):
+    # copy everything to be safe
+    rgb_im = rgb_frame.copy()
+    pts = point_tracks.copy()
+    vis = visibility.copy()
+
+    plt.imshow(rgb_im)
+    plt.scatter(pts[:,0][vis==1], pts[:,1][vis==1], s=1)
+    plt.scatter(pts[:,0][vis==0], pts[:,1][vis==0], c='r', s=1)
+    plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+    plt.close()
+    return None
+
+def save_track_vid(rgb_frames, point_tracks, visibilities, save_dir, im_title, pt_size=1):
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    # copy everything to be safe
+    rgb_seq = rgb_frames.copy()
+    pt_seq = point_tracks.numpy().copy()
+    vis_seq = visibilities.numpy().copy()
+
+    video_seq = []
+
+    for frame in range(len(rgb_seq)):
+        rgb_im = rgb_seq[frame]/255.0
+        pts = pt_seq[frame]
+        vis = vis_seq[frame]
+
+        save_path = os.path.join(save_dir, f'{im_title}_{frame}.png')
+
+        plt.imshow(rgb_im)
+        plt.xlim(-10, 520)
+        plt.ylim(400, -10)
+        plt.scatter(pts[:,0][vis==1], pts[:,1][vis==1], s=pt_size)
+        plt.scatter(pts[:,0][vis==0], pts[:,1][vis==0], c='r', s=pt_size)
+        plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+        plt.close()
+    return None
 
 class CoTrackerDataset(torch.utils.data.Dataset):
     def __init__(
@@ -56,11 +98,13 @@ class CoTrackerDataset(torch.utils.data.Dataset):
         # spatial augmentations
         self.pad_bounds = [0, 100]
         self.crop_size = crop_size
-        self.resize_lim = [0.25, 2.0]  # sample resizes from here
+        # self.resize_lim = [0.25, 2.0]  # sample resizes from here TODO: might be too drastic for us
+        self.resize_lim = [0.25, 1.25]
         self.resize_delta = 0.2
         self.max_crop_offset = 50
 
-        self.do_flip = True
+        # TODO: I don't think we need this ? 
+        self.do_flip = False
         self.h_flip_prob = 0.5
         self.v_flip_prob = 0.5
 
@@ -84,6 +128,7 @@ class CoTrackerDataset(torch.utils.data.Dataset):
         return sample, gotit
 
     def add_photometric_augs(self, rgbs, trajs, visibles, eraser=True, replace=True):
+        # TODO: train with and train without
         T, N, _ = trajs.shape
 
         S = len(rgbs)
@@ -201,7 +246,8 @@ class CoTrackerDataset(torch.utils.data.Dataset):
         scale_delta_y = 0.0
 
         rgbs_scaled = []
-        for s in range(S):
+        # randomness
+        for s in range(S): # iterate thru each frame in video
             if s == 1:
                 scale_delta_x = np.random.uniform(-self.resize_delta, self.resize_delta)
                 scale_delta_y = np.random.uniform(-self.resize_delta, self.resize_delta)
@@ -248,6 +294,8 @@ class CoTrackerDataset(torch.utils.data.Dataset):
             mid_x = np.mean(vis_trajs[0, :, 0])
             mid_y = np.mean(vis_trajs[0, :, 1])
         else:
+            # if only tracking one point - take avg of image crop (?)
+            # TODO: verify
             mid_y = self.crop_size[0]
             mid_x = self.crop_size[1]
 
@@ -378,8 +426,8 @@ class KubricMovifDataset(CoTrackerDataset):
 
         rgbs = np.stack(rgbs)
         annot_dict = np.load(npy_path, allow_pickle=True).item()
-        traj_2d = annot_dict["coords"]
-        visibility = annot_dict["visibility"]
+        traj_2d = annot_dict["coords"]  # [num_points, num_frames, 2]
+        visibility = annot_dict["visibility"] # [num_points, num_frames]
 
         # random crop
         assert self.seq_len <= len(rgbs)
@@ -392,22 +440,29 @@ class KubricMovifDataset(CoTrackerDataset):
 
         traj_2d = np.transpose(traj_2d, (1, 0, 2))
         visibility = np.transpose(np.logical_not(visibility), (1, 0))
+        # TODO: why are they taking logical not? check
+        # but changes things to T/F
+        # we don't take logical not in our data!!! 
         if self.use_augs:
             rgbs, traj_2d, visibility = self.add_photometric_augs(rgbs, traj_2d, visibility)
             rgbs, traj_2d = self.add_spatial_augs(rgbs, traj_2d, visibility)
         else:
             rgbs, traj_2d = self.crop(rgbs, traj_2d)
 
+        # adjust visibility flags of the points so that points outside of crop size set to inivisble
         visibility[traj_2d[:, :, 0] > self.crop_size[1] - 1] = False
         visibility[traj_2d[:, :, 0] < 0] = False
         visibility[traj_2d[:, :, 1] > self.crop_size[0] - 1] = False
         visibility[traj_2d[:, :, 1] < 0] = False
 
+        
         visibility = torch.from_numpy(visibility)
         traj_2d = torch.from_numpy(traj_2d)
-
+        
+        # get visible points from first frame
         visibile_pts_first_frame_inds = (visibility[0]).nonzero(as_tuple=False)[:, 0]
 
+        # either sample visible points from first frame or visible first+middle frame
         if self.sample_vis_1st_frame:
             visibile_pts_inds = visibile_pts_first_frame_inds
         else:
@@ -417,6 +472,8 @@ class KubricMovifDataset(CoTrackerDataset):
             visibile_pts_inds = torch.cat(
                 (visibile_pts_first_frame_inds, visibile_pts_mid_frame_inds), dim=0
             )
+        # randomly change the ordering in the batch to create randomly ordered batches
+        # (shuffle 1st and mid frame tracks)
         point_inds = torch.randperm(len(visibile_pts_inds))[: self.traj_per_sample]
         if len(point_inds) < self.traj_per_sample:
             gotit = False
@@ -427,6 +484,7 @@ class KubricMovifDataset(CoTrackerDataset):
         visibles = visibility[:, visible_inds_sampled]
         valids = torch.ones((self.seq_len, self.traj_per_sample))
 
+        # permute rgbs to be num_frames x 3 x H x w
         rgbs = torch.from_numpy(np.stack(rgbs)).permute(0, 3, 1, 2).float()
         sample = CoTrackerData(
             video=rgbs,
@@ -436,6 +494,8 @@ class KubricMovifDataset(CoTrackerDataset):
             seq_name=seq_name,
         )
         return sample, gotit
+    
+    # TODO - add visualizer methods to predictions to see that the dataclass is doing the right thing
 
     def __len__(self):
         return len(self.seq_names)

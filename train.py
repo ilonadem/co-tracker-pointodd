@@ -27,6 +27,7 @@ from pytorch_lightning.lite import LightningLite
 from cotracker.models.evaluation_predictor import EvaluationPredictor
 from cotracker.models.core.cotracker.cotracker import CoTracker2
 from cotracker.utils.visualizer import Visualizer
+from cotracker.datasets import pointodyssey_dataset
 from cotracker.datasets.tap_vid_datasets import TapVidDataset
 
 from cotracker.datasets.dr_dataset import DynamicReplicaDataset
@@ -134,6 +135,7 @@ def forward_batch(batch, model, args):
 
 
 def run_test_eval(evaluator, model, dataloaders, writer, step):
+    # TODO: look into code and make sure grid_size controls the query stride
     model.eval()
     for ds_name, dataloader in dataloaders:
         visualize_every = 1
@@ -164,7 +166,7 @@ def run_test_eval(evaluator, model, dataloaders, writer, step):
             visualize_every=visualize_every,
         )
 
-        if ds_name == "dynamic_replica" or ds_name == "kubric":
+        if ds_name == "dynamic_replica" or ds_name == "kubric" or ds_name == 'pointodyssey':
             metrics = {f"{ds_name}_avg_{k}": v for k, v in metrics["avg"].items()}
 
         if "tapvid" in ds_name:
@@ -302,8 +304,16 @@ class Lite(LightningLite):
 
         model.cuda()
 
-        train_dataset = kubric_movif_dataset.KubricMovifDataset(
-            data_root=os.path.join(args.dataset_root, "kubric", "kubric_movi_f_tracks"),
+        # train_dataset = kubric_movif_dataset.KubricMovifDataset(
+        #     data_root=os.path.join(args.dataset_root, "kubric", "kubric_movi_f_tracks"),
+        #     crop_size=args.crop_size,
+        #     seq_len=args.sequence_len,
+        #     traj_per_sample=args.traj_per_sample,
+        #     sample_vis_1st_frame=args.sample_vis_1st_frame,
+        #     use_augs=not args.dont_use_augs,
+        # )
+        train_dataset = pointodyssey_dataset.PointOdysseyDataset(
+            data_root=os.path.join(args.dataset_root, "pointodyssey", "train"),
             crop_size=args.crop_size,
             seq_len=args.sequence_len,
             traj_per_sample=args.traj_per_sample,
@@ -368,8 +378,9 @@ class Lite(LightningLite):
             model.load_state_dict(state_dict, strict=strict)
 
             logging.info(f"Done loading checkpoint")
+
         model, optimizer = self.setup(model, optimizer, move_to_device=False)
-        # model.cuda()
+        model.cuda()
         model.train()
 
         save_freq = args.save_freq
@@ -611,7 +622,7 @@ if __name__ == "__main__":
 
     Lite(
         strategy=DDPStrategy(find_unused_parameters=False),
-        devices="auto",
+        devices=[3, 4],
         accelerator="gpu",
         precision=32,
         num_nodes=args.num_nodes,
