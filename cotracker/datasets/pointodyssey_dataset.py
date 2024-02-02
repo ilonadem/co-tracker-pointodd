@@ -39,6 +39,7 @@ class PointOdysseyDataset(CoTrackerDataset):
         self.resize_lim = [0.5, .75]  # sample resizes from here
         self.resize_delta = 0.05
         self.max_crop_offset = 15
+        self.strides=[3, 4]
         self.seq_names = [
             fname
             for fname in os.listdir(data_root)
@@ -68,8 +69,9 @@ class PointOdysseyDataset(CoTrackerDataset):
         for i, img_path in enumerate(img_paths):
             image = imageio.v2.imread(os.path.join(rgb_path, img_path))
             rgbs.append(image)
+        pdb.set_trace()
         
-        
+
         rgbs = np.stack(rgbs) # [num_frames, height, width, 3]
         annotations = np.load(npy_path, allow_pickle=True)
         trajs = annotations['trajs_2d'].astype(np.float32)
@@ -80,6 +82,7 @@ class PointOdysseyDataset(CoTrackerDataset):
 
         if self.seq_len < len(rgbs):
             start_ind = np.random.choice(len(rgbs) - self.seq_len, 1)[0]
+            seq_stride = np.random.choice(self.strides)
 
         # ensure that the point is good at start_ind
         vis_and_val = valids * visibs
@@ -131,10 +134,10 @@ class PointOdysseyDataset(CoTrackerDataset):
         # random crop
         assert self.seq_len <= len(rgbs)
         if self.seq_len < len(rgbs):
-
-            rgbs = rgbs[start_ind : start_ind + self.seq_len] # crop sequence to certain length
-            traj_2d = traj_2d[:, start_ind : start_ind + self.seq_len]
-            visibility = visibility[:, start_ind : start_ind + self.seq_len]
+            # pdb.set_trace()
+            rgbs = rgbs[start_ind : start_ind + self.seq_len*seq_stride:seq_stride] # crop sequence to certain length
+            traj_2d= traj_2d[:, start_ind : start_ind + self.seq_len*seq_stride:seq_stride]
+            visibility = visibility[:, start_ind : start_ind + self.seq_len*seq_stride:seq_stride]
 
         traj_2d = np.transpose(traj_2d, (1, 0, 2))
         visibility = np.transpose(visibility, (1, 0))
