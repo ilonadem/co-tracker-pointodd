@@ -69,7 +69,7 @@ class PointOdysseyDataset(CoTrackerDataset):
         for i, img_path in enumerate(img_paths):
             image = imageio.v2.imread(os.path.join(rgb_path, img_path))
             rgbs.append(image)
-        pdb.set_trace()
+        # pdb.set_trace()
         
 
         rgbs = np.stack(rgbs) # [num_frames, height, width, 3]
@@ -81,8 +81,9 @@ class PointOdysseyDataset(CoTrackerDataset):
         visibs = (visibs==1).astype(np.float32) # S,N
 
         if self.seq_len < len(rgbs):
-            start_ind = np.random.choice(len(rgbs) - self.seq_len, 1)[0]
             seq_stride = np.random.choice(self.strides)
+            start_ind = np.random.choice(len(rgbs) - self.seq_len*seq_stride, 1)[0]
+            
 
         # ensure that the point is good at start_ind
         vis_and_val = valids * visibs
