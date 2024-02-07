@@ -118,10 +118,11 @@ def forward_batch(batch, model, args):
 
     S = args.sliding_window_len
     for ind in range(0, args.sequence_len - S // 2, S // 2):
-        vis_gts.append(vis_g[:, ind : ind + S])
+        # vis_gts.append(vis_g[:, ind : ind + S])
+        vis_gts.append(vis_g[:, : S])
         traj_gts.append(trajs_g[:, ind : ind + S])
         valids_gts.append(valids[:, ind : ind + S] * valid_mask[:, ind : ind + S])
-        
+
     seq_loss = sequence_loss(coord_predictions, traj_gts, vis_gts, valids_gts, 0.8)
     vis_loss = balanced_ce_loss(vis_predictions, vis_gts, valids_gts)
 
@@ -521,7 +522,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--evaluate_every_n_epoch",
         type=int,
-        default=1,
+        default=4,
         help="evaluate during training after every n epochs, after every epoch by default",
     )
     parser.add_argument(
@@ -614,7 +615,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
+        format="%(asctime)s %(levelname) -8s [%(filename)s:%(lineno)d] %(message)s",
     )
 
     Path(args.ckpt_path).mkdir(exist_ok=True, parents=True)
@@ -622,7 +623,7 @@ if __name__ == "__main__":
 
     Lite(
         strategy=DDPStrategy(find_unused_parameters=False),
-        devices=[3, 4],
+        devices=[0, 1],
         accelerator="gpu",
         precision=32,
         num_nodes=args.num_nodes,

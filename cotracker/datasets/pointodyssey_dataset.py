@@ -65,27 +65,24 @@ class PointOdysseyDataset(CoTrackerDataset):
         rgb_path = os.path.join(self.data_root, seq_name, "rgbs")
 
         img_paths = sorted(os.listdir(rgb_path))
+        if self.seq_len < len(img_paths):
+            seq_stride = np.random.choice(self.strides)
+            start_ind = np.random.choice(len(img_paths) - self.seq_len*seq_stride -1, 1)[0]
+
         rgbs = []
-        for i, img_path in enumerate(img_paths):
+        for img_path in img_paths[start_ind:start_ind+self.seq_len*seq_stride:seq_stride]:
             image = imageio.v2.imread(os.path.join(rgb_path, img_path))
             rgbs.append(image)
-        # pdb.set_trace()
-        
 
-        rgbs = np.stack(rgbs) # [num_frames, height, width, 3]
+        rgbs = np.stack(rgbs) # [seq_len, height, width, 3]
         annotations = np.load(npy_path, allow_pickle=True)
         trajs = annotations['trajs_2d'].astype(np.float32)
         visibs = annotations['visibs'].astype(np.float32)
-        # TODO - verify what visibs flag is doing (how many categories etc.)
+        
+        # # TODO - verify what visibs flag is doing (how many categories etc.)
         valids = (visibs<2).astype(np.float32) # S,N
         visibs = (visibs==1).astype(np.float32) # S,N
-
-        if self.seq_len < len(rgbs):
-            seq_stride = np.random.choice(self.strides)
-            start_ind = np.random.choice(len(rgbs) - self.seq_len*seq_stride, 1)[0]
-            
-
-        # ensure that the point is good at start_ind
+        
         vis_and_val = valids * visibs
         vis0 = vis_and_val[start_ind] > 0
         trajs = trajs[:,vis0]
@@ -121,7 +118,7 @@ class PointOdysseyDataset(CoTrackerDataset):
         visibs = visibs[:,vis1]
         valids = valids[:,vis1]
 
-        H,W,C = rgbs[start_ind].shape
+        H,W,C = rgbs[0].shape
         trajs = np.minimum(np.maximum(trajs, np.array([-64,-64])), np.array([W+64, H+64])) # S,N,2
         
         # rename variables to cotracker dataloader names
@@ -133,10 +130,9 @@ class PointOdysseyDataset(CoTrackerDataset):
         traj_2d = np.transpose(traj_2d, (1, 0, 2)) # [num_points, num_frames, 2]
 
         # random crop
-        assert self.seq_len <= len(rgbs)
-        if self.seq_len < len(rgbs):
-            # pdb.set_trace()
-            rgbs = rgbs[start_ind : start_ind + self.seq_len*seq_stride:seq_stride] # crop sequence to certain length
+        assert self.seq_len <= len(img_paths)
+        if self.seq_len < len(img_paths):
+            # rgbs = rgbs[start_ind : start_ind + self.seq_len*seq_stride:seq_stride] # crop sequence to certain length
             traj_2d= traj_2d[:, start_ind : start_ind + self.seq_len*seq_stride:seq_stride]
             visibility = visibility[:, start_ind : start_ind + self.seq_len*seq_stride:seq_stride]
 
@@ -183,8 +179,6 @@ class PointOdysseyDataset(CoTrackerDataset):
         point_inds = torch.randperm(len(visibile_pts_inds))[: self.traj_per_sample]
         if len(point_inds) < self.traj_per_sample:
             # if false then they pad the points
-            # print("len(point_inds) < self.traj_per_sample")
-            # print(f"{len(point_inds)} < {self.traj_per_sample}")
             gotit = False
             
 
@@ -198,10 +192,8 @@ class PointOdysseyDataset(CoTrackerDataset):
             save_track_vid(rgbs, trajs, visibles, os.path.join(interm_save_dir, 'intermediate_vids',f'{seq_name}_all_points'), f'{seq_name}_all_points')
             pts = [[31, 20]]
             for pt in pts:
-                # pdb.set_trace()
                 if visibles.shape[1]>31:
                     save_track_vid(rgbs, trajs[:,pt,:], visibles[:,pt], os.path.join(interm_save_dir, 'intermediate_vids',f'{seq_name}_{pt}'), f'{pt}', 15)
-            # pdb.set_trace()
 
         # permute rgbs to be num_frames x 3 x H x w
         rgbs = torch.from_numpy(np.stack(rgbs)).permute(0, 3, 1, 2).float()
